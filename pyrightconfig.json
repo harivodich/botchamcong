@@ -1,9 +1,0 @@
-{
-  "venvPath": "E:\\anaconda\\envs",
-  "venv": "HariAI",
-  "extraPaths": [
-    "E:\\anaconda\\envs\\HariAI\\Lib\\site-packages"
-  ],
-  "typeCheckingMode": "off",
-  "reportMissingTypeStubs": false
-}

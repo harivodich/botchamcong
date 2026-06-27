@@ -1,0 +1,101 @@
+KẾ HOẠCH TRIỂN KHAI DỰ ÁN AUTOMATION CHẤM CÔNG GIÁO VIÊN
+
+Ngày 1: Thiết kế Kiến trúc & Khởi tạo Template (Đã hoàn thành)
+Mục tiêu: Chốt luồng hoạt động tổng thể, định hình cấu trúc code và chuẩn bị sẵn sàng biểu mẫu đầu ra.
+
+- Thiết kế Workflow & Microservices:
+    + Vẽ sơ đồ luồng quy trình (Workflow) của toàn bộ hệ thống automation.
+    + Phân rã kiến trúc thành các microservices độc lập để dễ quản lý và mở rộng.
+
+- Xây dựng template_form trên Google Sheets:
+    + Tạo bảng tính mẫu với đầy đủ cấu trúc cột và định dạng chuẩn.
+    + Thiết lập các công thức tự động tính toán và khóa cứng (Protect ranges) các ô/cột chứa công thức để tránh bị người dùng thay đổi nhầm.
+    + Viết logic để tự động nhân bản (duplicate) template này khi có sự kiện tạo trang tính mới cho kỳ/tháng mới.
+
+Ngày 2: Xây dựng Database & Luồng Đồng bộ Dữ liệu (Đã hoàn thành)
+Mục tiêu: Thiết lập nơi lưu trữ gốc và ghép nối luồng luân chuyển dữ liệu.
+- Khởi tạo Database quản lý thông tin định danh và lịch sử dạy của Giáo viên.
+- Xử lý luồng Dữ liệu Chấm công: Viết module đọc file Excel (Ingestion Service) trích xuất dữ liệu.
+- Xây dựng quy tắc tính công (Payroll Engine): Quy đổi 5 HV -> X, 4 HV -> 0.7X, <= 3 HV -> 0.5X.
+
+Ngày 3: Phát triển tính năng Quản lý (CRUD) & Tối ưu Form (Đã hoàn thành)
+Mục tiêu: Hoàn thiện tương tác người dùng qua Telegram và đồng bộ Google Sheets.
+- Cấu hình các lệnh Telegram Bot: /add_gv, /edit_gv, /del_gv, /list_gv.
+- Code logic đồng bộ 2 chiều (Real-time): Thêm/xóa dòng tự động trên Google Sheets.
+- Dịch chuyển và chuẩn hóa cấu trúc cột Sheet: Mã GV ở Cột B, Tên Cột C, Tiền phạt Cột F, Ghi chú Cột G, Các ngày từ Cột P.
+- Xử lý Batch Update cộng dồn công (X -> XX) và tiền phạt.
+
+Ngày 4: Xử lý Ngoại lệ & Toàn vẹn Dữ liệu (Đã hoàn thành)
+Mục tiêu: Đảm bảo dữ liệu tính toán chính xác tuyệt đối và phòng ngừa rủi ro sai sót/mất mát dữ liệu.
+- Xử lý Ngoại lệ: Bổ sung logic tính công cho Dạy thay, Nghỉ phép và nhân hệ số lương cho ngày Lễ/Tết.
+- Chống đẩy trùng File: Cơ chế Hash mã file để chặn rủi ro nhân đôi lương khi lỡ gửi 1 file 2 lần.
+- Tính năng Hoàn tác (Undo): Lệnh /undo để thu hồi/xóa số liệu của một file Excel lỡ gửi nhầm, trả lại nguyên trạng Sheet.
+- Tự động Sao lưu (Auto-Backup): Background job tự động nén Database và đẩy lên lưu trữ an toàn (Google Drive) hàng đêm.
+
+Ngày 5: Quản trị, Phân quyền & Báo cáo (Governance & Reporting)
+Mục tiêu: Tối ưu hóa trải nghiệm quản lý của Cấp trên và đảm bảo tính minh bạch, bảo mật hệ thống.
+- Phân quyền Bảo mật (Authorization): Cấu hình chỉ cho phép Telegram ID của Admin thao tác lệnh nhạy cảm trên Bot.
+- Lưu vết Hệ thống (Audit Logging): Ghi nhận lịch sử tác động dữ liệu (ai thêm/sửa/xóa GV, ai upload file) để đối soát.
+- Luồng Duyệt & Khóa Dữ liệu (Approval): Lệnh /close chốt bảng lương cuối tháng, tự động khóa (Protect) Google Sheets.
+- Báo cáo Nhanh (Dashboard): Lệnh /report trả về biểu đồ/tóm tắt tổng quỹ lương, số ca dạy... trực tiếp trên Telegram.
+- Tra cứu Lương: Cấu hình link Google Sheets chế độ "View-only" gửi nhóm chung để giáo viên tự tra cứu.
+
+Ngày 6: Kiểm thử Toàn diện (QA/QC) & Nghiệm thu (Ngày cuối)
+Mục tiêu: Đảm bảo hệ thống chạy mượt mà, không phát sinh lỗi ở các tình huống thực tế và sẵn sàng bàn giao.
+- Chạy các công cụ Test giả lập (generate_test.py, scratch_analyze.py) với quy mô hàng nghìn bản ghi để Stress Test.
+- Test các "Edge cases" (trường hợp dị thường): Nhập sai định dạng data, rớt mạng khi đang đồng bộ, người dùng lỡ tay thay đổi cấu trúc file sheet,...
+- Đánh giá giới hạn gọi API (Rate limit) của Google Sheets. Fix bugs (nếu có), viết tài liệu hướng dẫn và đóng gói dự án bàn giao.
+
+-----------------------------------------------------------
+PHASE 2: VERSION 2.0 (ENTERPRISE SAAS & NÂNG CẤP MỞ RỘNG)
+Mục tiêu: Đưa dự án từ công cụ nội bộ thành một Nền tảng quản lý quy mô doanh nghiệp cho N cơ sở.
+
+1. Kiến trúc Đa cơ sở (Multi-tenant Architecture):
+- Quản lý tập trung: Gắn thêm mã facility_id vào mọi ngóc ngách của Database để cách ly dữ liệu giữa các cơ sở.
+- Smart Routing Bot: Dùng duy nhất 1 Bot điều phối. Bot được add vào các Group Telegram khác nhau, tự động dựa vào Group ID để biết đang nhận lệnh từ cơ sở nào và đổ data về đúng Google Sheets của cơ sở đó.
+
+2. Cấu hình Động (Dynamic Configuration):
+- Tham số hóa luật tính công: Đưa các luật (5 HV -> X, 4 HV -> 0.7X) vào Database để mỗi cơ sở có thể tự do cấu hình chính sách lương khác nhau.
+- Dynamic Excel Mapping: Cho phép mỗi cơ sở upload một mẫu form Excel khác nhau, hệ thống tự động ánh xạ cột thông minh thay vì bắt mọi nơi dùng chung 1 form cứng nhắc.
+
+3. Hàng Đợi Bất Đồng Bộ (Database Task Queue):
+- Xây dựng một hàng đợi bằng chính bảng PostgreSQL (không cần Redis để tối ưu chi phí hạ tầng cho quy mô < 50 cơ sở).
+- Khi giờ cao điểm quản lý 10 cơ sở cùng đẩy file lên Bot, Bot sẽ đưa file vào hàng đợi và xử lý dần. Tuyệt đối không treo server hay rớt dữ liệu kể cả khi mất điện đột ngột.
+
+4. Bảo Mật & Phân Quyền Nâng Cao (RBAC):
+- Hệ thống Role-based: Phân cấp rõ rệt "Super Admin" (Ban Giám Đốc) có thể xem báo cáo tổng hợp quỹ lương toàn hệ thống, và "Facility Manager" (Quản lý cơ sở) chỉ quản lý vùng của mình.
+- Tích hợp thêm Dashboard Web-Admin đơn giản (FastAPI/Streamlit) để Sếp dễ dàng nhìn biểu đồ quỹ lương tổng quan.
+
+5. Đọc Dữ Liệu Thông Minh Bằng AI/OCR:
+- Tích hợp Google Vision API hoặc Gemini AI để xử lý báo cáo dạng "Ảnh chụp": Quản lý/Bảo vệ chỉ cần chụp ảnh giấy chấm công viết tay gửi lên Bot. AI sẽ dùng OCR đọc chữ viết tay, tự động trích xuất Tên GV, Số HV, Số ca dạy và đẩy thẳng vào Database. Không cần ai phải ngồi gõ lại file Excel!
+
+6. Cảnh Báo Chống Gian Lận (Fraud Detection):
+- Tự động đối soát và bắn cảnh báo về cho Sếp nếu phát hiện một Giáo viên có lịch dạy trùng giờ ở 2 cơ sở cách xa nhau. 
+- Phát hiện bất thường quỹ lương tăng vọt so với trung bình tháng trước.
+
+-----------------------------------------------------------
+PHASE 3: ENTERPRISE ECOSYSTEM (TẦM NHÌN TÍCH HỢP DOANH NGHIỆP - C-LEVEL VISION)
+Mục tiêu: Đứng dưới góc độ Ban Giám Đốc (CEO/CFO), biến công cụ Chấm công thành hệ sinh thái ERP thu nhỏ, kết nối trực tiếp với dòng tiền và định hướng kinh doanh.
+
+7. Tích hợp Kế Toán & Ngân Hàng (Financial & Banking Integration):
+- Xuất File Chuyển Khoản: Hệ thống tự động xuất ra file Excel chuẩn format của các ngân hàng (Techcombank, Vietcombank...) để kế toán chỉ việc upload lên Internet Banking là chuyển khoản hàng loạt chỉ với 1 click.
+- Tích hợp Phần mềm Kế toán (MISA/Fast/SAP): Bắn thẳng API chi phí lương vào hệ thống kế toán để tự động hạch toán chi phí doanh nghiệp mà không cần nhập liệu tay 2 lần.
+
+8. Thuế TNCN & Bảo hiểm xã hội (Tax & Compliance):
+- Tự động tính toán và khấu trừ Thuế Thu nhập cá nhân (PIT) luỹ tiến hoặc mức cố định 10% (đối với CTV/Freelance). 
+- Quản lý lịch sử nâng hạng lương, thời hạn hợp đồng để cảnh báo HR gia hạn hợp đồng kịp thời.
+
+9. Business Intelligence (BI) & Đánh giá Hiệu Suất (Performance/KPI):
+- Dữ liệu chấm công chính là "mỏ vàng" kinh doanh. Hệ thống sẽ tự vẽ biểu đồ phân tích: 
+   + Giáo viên nào thu hút đông học viên nhất (Star Teachers)? 
+   + Cơ sở nào đang hoạt động kém hiệu quả (tỉ lệ học viên/ca thấp)?
+   + Môn học nào (Yoga, Zumba, Dance...) mang lại ROI cao nhất?
+=> Giúp Giám đốc đưa ra quyết định sa thải, thưởng nóng hoặc dồn ngân sách Marketing cho đúng bộ môn.
+
+10. Cổng Thông Tin Tự Phục Vụ (Teacher Self-Service Portal):
+- Không dùng Google Sheets thô sơ nữa. Xây dựng Zalo Mini App hoặc Telegram Bot riêng dành cho Giáo viên.
+- Giáo viên tự tra cứu bảng lương dự kiến của mình mỗi ngày. Nếu thấy số lượng học viên ghi nhận bị sai, họ có nút "Khiếu Nại" (Raise Dispute). Khiếu nại sẽ bắn thẳng về Bot của Quản lý để giải quyết ngay trong ngày, chấm dứt tình trạng cãi nhau chốt số vào ngày cuối tháng.
+
+11. Quản lý Lịch Trình Khớp Mã (Roster vs Actual matching):
+- Thay vì chỉ ghi nhận "Sự đã rồi", hệ thống nâng cấp cho phép tạo Lịch Dạy Dự Kiến từ đầu tháng.
+- Đến ngày thực tế, hệ thống đối chiếu: Giáo viên A có lịch nhưng không báo cáo -> Cảnh báo nghỉ không phép. Giáo viên B đi dạy thay -> Tự động trừ lương người A chuyển sang cho người B.

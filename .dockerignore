@@ -1,0 +1,10 @@
+.git
+.vscode
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.xlsx
+~$*.xlsx
+backups/

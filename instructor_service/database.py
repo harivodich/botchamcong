@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import os
@@ -35,7 +36,7 @@ def create_database_if_not_exists():
         exists = cursor.fetchone()
         
         if not exists:
-            cursor.execute(f"CREATE DATABASE {DB_NAME}")
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_NAME)))
             print(f"Đã tạo Database '{DB_NAME}' thành công!")
             
         cursor.close()
@@ -44,12 +45,17 @@ def create_database_if_not_exists():
         print(f"Lỗi khi kiểm tra/tạo database: {e}")
 
 def get_connection():
+    """
+    Kết nối vào Supabase PostgreSQL
+    Sử dụng options để set schema mặc định là public (tránh lỗi với PgBouncer Transaction Mode)
+    """
     return psycopg2.connect(
         host=DB_HOST,
         port=DB_PORT,
         dbname=DB_NAME,
         user=DB_USER,
-        password=DB_PASS
+        password=DB_PASS,
+        options="-c search_path=public"
     )
 
 def init_db():
@@ -269,7 +275,7 @@ def get_logs_by_file_hash(file_hash: str):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("""
-        SELECT tl.date, i.name as instructor_name, tl.student_count, tl.penalty_fee, tl.note
+        SELECT tl.date, tl.instructor_id, i.name as instructor_name, i.base_rate, tl.student_count, tl.penalty_fee, tl.note
         FROM teaching_logs tl
         JOIN instructors i ON tl.instructor_id = i.id
         WHERE tl.file_hash = %s

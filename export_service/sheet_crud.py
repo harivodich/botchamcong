@@ -1,6 +1,58 @@
 import gspread
 from export_service.sheet_manager import get_or_create_monthly_sheet, get_google_client, SPREADSHEET_ID
 
+DEPARTMENTS = {"YOGA", "GX"}
+
+
+def _normalize(value) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _cell(row, index: int) -> str:
+    return str(row[index]).strip() if len(row) > index else ""
+
+
+def _is_instructor_row(row) -> bool:
+    return bool(_cell(row, 1) and _cell(row, 2) and _cell(row, 3))
+
+
+def _row_has_exact_value(row, expected: str, max_cols: int = 5) -> bool:
+    expected_normalized = _normalize(expected)
+    return any(_normalize(value) == expected_normalized for value in row[:max_cols])
+
+
+def _is_department_header(row, department: str) -> bool:
+    return not _is_instructor_row(row) and _row_has_exact_value(row, department)
+
+
+def _is_any_department_header(row) -> bool:
+    return any(_is_department_header(row, department) for department in DEPARTMENTS)
+
+
+def _is_group_header(row, group_name: str) -> bool:
+    return not _is_instructor_row(row) and _row_has_exact_value(row, group_name)
+
+
+def _find_group_header_row(all_values, department: str, group_name: str) -> int:
+    dept_row_index = None
+    for index, row in enumerate(all_values):
+        if _is_department_header(row, department):
+            dept_row_index = index
+            break
+
+    if dept_row_index is None:
+        raise ValueError(f"Khong tim thay bo phan '{department}' tren sheet.")
+
+    for index in range(dept_row_index + 1, len(all_values)):
+        row = all_values[index]
+        if _is_any_department_header(row):
+            break
+        if _is_group_header(row, group_name):
+            return index + 1
+
+    raise ValueError(f"Khong tim thay nhom '{group_name}' trong bo phan '{department}' tren sheet.")
+
+
 def get_template_and_current_sheet(month: int, year: int):
     gc = get_google_client()
     spreadsheet = gc.open_by_key(SPREADSHEET_ID or "")
@@ -18,21 +70,7 @@ def _add_instructor_to_worksheet(worksheet, group_name: str, ins_data):
     all_values = worksheet.get_all_values()
     
     # 1. Tìm dòng tiêu đề của nhóm
-    group_header_row = -1
-    for i, row in enumerate(all_values):
-        # Bộ phận (Group name) có thể nằm ở cột A (0), B (1) hoặc C (2) tùy form
-        if len(row) > 0 and str(row[0]).strip().lower() == group_name.strip().lower():
-            group_header_row = i + 1
-            break
-        elif len(row) > 1 and str(row[1]).strip().lower() == group_name.strip().lower():
-            group_header_row = i + 1
-            break
-        elif len(row) > 2 and str(row[2]).strip().lower() == group_name.strip().lower():
-            group_header_row = i + 1
-            break
-            
-    if group_header_row == -1:
-        raise ValueError(f"Không tìm thấy nhóm '{group_name}' trên sheet {worksheet.title}.")
+    group_header_row = _find_group_header_row(all_values, ins_data.department, group_name)
         
     # Chèn vào ngay dưới giáo viên đầu tiên
     first_ins_row = group_header_row + 1

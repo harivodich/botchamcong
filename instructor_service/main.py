@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
-from models import Instructor
-import database
+
+from instructor_service import database
+from instructor_service.models import Instructor
 
 app = FastAPI(title="Instructor Management Service")
 

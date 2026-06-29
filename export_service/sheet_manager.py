@@ -1,6 +1,9 @@
 import gspread
+import json
+import logging
 import os
 from dotenv import load_dotenv
+from google.oauth2.service_account import Credentials
 
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.abspath(os.path.join(current_dir, ".."))
@@ -9,7 +12,34 @@ load_dotenv(os.path.join(parent_dir, ".env"))
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 CREDENTIALS_PATH = os.path.join(parent_dir, "credentials.json")
 
+
+def _worksheet_is_locked(spreadsheet, worksheet) -> bool:
+    metadata = spreadsheet.fetch_sheet_metadata(params={"includeGridData": False})
+    for sheet in metadata.get("sheets", []):
+        properties = sheet.get("properties", {})
+        if properties.get("sheetId") != worksheet.id:
+            continue
+
+        for protected_range in sheet.get("protectedRanges", []):
+            if protected_range.get("warningOnly", False):
+                continue
+            protected_sheet_id = protected_range.get("range", {}).get("sheetId")
+            if protected_sheet_id == worksheet.id:
+                return True
+    return False
+
 def get_google_client():
+    credentials_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if credentials_json:
+        credentials = Credentials.from_service_account_info(
+            json.loads(credentials_json),
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ],
+        )
+        return gspread.authorize(credentials)
+
     if not os.path.exists(CREDENTIALS_PATH):
         raise FileNotFoundError("Không tìm thấy file credentials.json! Vui lòng đặt nó ở thư mục gốc của project.")
     # Xác thực bằng service account
@@ -60,16 +90,15 @@ def lock_worksheet(month: int, year: int) -> bool:
             
         gc = get_google_client()
         spreadsheet = gc.open_by_key(SPREADSHEET_ID)
-        sheet_name = f"Thang_{month:02d}_{year}"
-        
-        try:
-            worksheet = spreadsheet.worksheet(sheet_name)
-        except gspread.exceptions.WorksheetNotFound:
-            return False
+        worksheet = get_or_create_monthly_sheet(month, year)
+        if _worksheet_is_locked(spreadsheet, worksheet):
+            return True
             
         # Lấy client email của Service Account
         credentials = getattr(gc, "auth", getattr(getattr(gc, "http_client", None), "auth", None))
         service_email = getattr(credentials, "signer_email", getattr(credentials, "service_account_email", ""))
+        if not service_email:
+            raise ValueError("Không xác định được service account email để cấu hình quyền khóa sheet.")
         
         # Gửi request bằng batchUpdate để lock sheet cho 1 user
         body = {
@@ -92,12 +121,18 @@ def lock_worksheet(month: int, year: int) -> bool:
             ]
         }
         
-        spreadsheet.client.request(
-            'post',
-            f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}:batchUpdate',
-            json=body
-        )
+        try:
+            spreadsheet.client.request(
+                'post',
+                f'https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}:batchUpdate',
+                json=body
+            )
+        except Exception as e:
+            message = str(e).lower()
+            if "already exists" not in message and "duplicate" not in message:
+                raise
         return True
     except Exception as e:
+        logging.exception("Lỗi lock_worksheet")
         print(f"Lỗi lock_worksheet: {e}")
         return False

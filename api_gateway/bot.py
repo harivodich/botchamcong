@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import os
 import sys
 import tempfile
@@ -7,7 +7,7 @@ from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, Document
+from aiogram.types import Message, Document, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -40,7 +40,7 @@ def is_admin(user_id: int) -> bool:
     return str(user_id) in admin_list
 
 # Khởi tạo Bot và Dispatcher
-bot = Bot(token=TOKEN or "")
+bot = Bot(token=TOKEN) if TOKEN else None
 dp = Dispatcher()
 
 # --- FSM STATES ---
@@ -90,19 +90,165 @@ async def cancel_handler(message: Message, state: FSMContext) -> None:
 async def command_start_handler(message: Message) -> None:
     welcome_text = (
         "🤖 <b>Bot Tính Công Giáo Viên</b>\n\n"
-        "💡 <b>Lưu ý:</b> Link Bảng lương được ghim (pin) trong Group nội bộ của công ty. Vui lòng truy cập Group để tra cứu.\n\n"
-        "🛠 <b>Các lệnh Quản lý (Chỉ Admin):</b>\n"
-        "/list_gv (Xem danh sách GV)\n"
-        "/add_gv (Thêm giáo viên mới)\n"
-        "/edit_gv (Sửa thông tin giáo viên)\n"
-        "/del_gv (Xóa giáo viên)\n"
-        "/undo (Thu hồi file)\n"
-        "/close (Chốt lương)\n"
-        "/report (Báo cáo tổng quỹ lương)\n"
-        "/check (Tra cứu chi tiết)\n\n"
-        "Hoặc Gửi 1 file Excel bảng công vào đây, tôi sẽ tự động xử lý!"
+        f"📊 <b>Bảng Lương Online:</b> <a href='https://docs.google.com/spreadsheets/d/{os.getenv('SPREADSHEET_ID')}/edit'>Bấm vào đây để xem</a>\n\n"
+        "👇 <b>Chọn một chức năng bên dưới (Chỉ Admin):</b>"
     )
-    await message.answer(welcome_text, parse_mode="HTML")
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Báo cáo quỹ lương", callback_data="menu_report")],
+        [InlineKeyboardButton(text="🔍 Tra cứu cá nhân", callback_data="menu_check")],
+        [InlineKeyboardButton(text="🔒 Chốt lương (Xuất Excel)", callback_data="menu_close")],
+        [InlineKeyboardButton(text="👨‍🏫 Thêm Giáo viên", callback_data="menu_add_gv"), 
+         InlineKeyboardButton(text="📝 Sửa Giáo viên", callback_data="menu_edit_gv")],
+        [InlineKeyboardButton(text="📋 Danh sách GV", callback_data="menu_list_gv"),
+         InlineKeyboardButton(text="❌ Xóa Giáo viên", callback_data="menu_del_gv")],
+        [InlineKeyboardButton(text="⏪ Thu hồi file lỗi", callback_data="menu_undo")]
+    ])
+    await message.answer(welcome_text, parse_mode="HTML", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith("menu_"))
+async def process_menu_callback(callback: CallbackQuery, state: FSMContext):
+    import logging
+    logging.error(f"DEBUG: callback triggered with data {callback.data}")
+    try:
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Bạn không có quyền!", show_alert=True)
+            return
+            
+        await callback.answer()
+        action = callback.data.split("_", 1)[1]
+        logging.error(f"DEBUG: action {action}")
+        
+        chat_id = callback.message.chat.id
+        
+        if action == "report":
+            await state.set_state(ReportFSM.month_year)
+            now = datetime.now()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"report_month_{now.month}_{now.year}")],
+                [InlineKeyboardButton(text="Tháng Trước", callback_data=f"report_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+            ])
+            await bot.send_message(chat_id, "👉 Chọn hoặc Nhập Tháng và Năm cần xuất Báo cáo (VD: `06/2026`):", reply_markup=kb)
+            
+        elif action == "check":
+            await state.set_state(CheckFSM.month_year)
+            now = datetime.now()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"check_month_{now.month}_{now.year}")],
+                [InlineKeyboardButton(text="Tháng Trước", callback_data=f"check_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+            ])
+            await bot.send_message(chat_id, "👉 Chọn hoặc Nhập Tháng và Năm cần tra cứu (VD: `06/2026`):", reply_markup=kb)
+            
+        elif action == "close":
+            await state.set_state(CloseFSM.month_year)
+            now = datetime.now()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"close_month_{now.month}_{now.year}")],
+                [InlineKeyboardButton(text="Tháng Trước", callback_data=f"close_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+            ])
+            await bot.send_message(chat_id, "👉 Chọn hoặc Nhập Tháng và Năm cần CHỐT LƯƠNG (VD: `06/2026`):", reply_markup=kb)
+            
+        elif action == "add_gv":
+            await state.set_state(AddGV.ins_id)
+            await bot.send_message(chat_id, "Bắt đầu thêm GV mới. Bạn có thể gõ /cancel để hủy bất kỳ lúc nào.\n\n👉 1. Vui lòng nhập Mã Giáo Viên (VD: GV05):")
+            
+        elif action == "edit_gv":
+            await state.set_state(EditGV.ins_id)
+            await bot.send_message(chat_id, "Bắt đầu sửa thông tin GV. Gõ /cancel để hủy.\n\n👉 Nhập Mã Giáo Viên cần sửa (VD: GV05):")
+            
+        elif action == "del_gv":
+            await state.set_state(DelGV.ins_id)
+            await bot.send_message(chat_id, "Bắt đầu XÓA Giáo Viên. Gõ /cancel để hủy.\n\n👉 Nhập Mã Giáo Viên cần xóa (VD: GV05):")
+            
+        elif action == "list_gv":
+            instructors = get_all_instructors()
+            if not instructors:
+                await bot.send_message(chat_id, "Danh sách giáo viên hiện đang trống.")
+                return
+            report = "📋 DANH SÁCH GIÁO VIÊN\n\n"
+            for ins in instructors:
+                line = f"▪️ {ins['id']} - {ins['name']} ({ins['department']} - {ins['group_name']})\n"
+                title_str = f"Chức danh: {ins['title']}, " if ins['title'] else ""
+                line += f"   {title_str}Giá: {ins['base_rate']:,}đ\n"
+                if len(report) + len(line) > 3500:
+                    await bot.send_message(chat_id, report)
+                    report = ""
+                report += line
+            if report:
+                await bot.send_message(chat_id, report)
+            
+        elif action == "undo":
+            await state.set_state(UndoFSM.file_hash)
+            await bot.send_message(chat_id, "👉 Nhập Mã File (8 ký tự) bạn muốn thu hồi dữ liệu (hoặc gõ /cancel để hủy):")
+    except Exception as e:
+        logging.error(f"DEBUG: Exception in menu callback: {e}", exc_info=True)
+        await bot.send_message(callback.message.chat.id if callback.message else callback.from_user.id, f"❌ Có lỗi xảy ra trong bot: {e}")
+
+@dp.callback_query(F.data.startswith("report_month_") | F.data.startswith("check_month_") | F.data.startswith("close_month_"))
+async def process_month_callback(callback: CallbackQuery, state: FSMContext):
+    try:
+        await callback.answer()
+        parts = callback.data.split("_")
+        action = parts[0]
+        month, year = int(parts[2]), int(parts[3])
+        msg = callback.message
+        
+        if action == "report":
+            await state.clear()
+            from payroll_engine.report import generate_monthly_report
+            report_text = await asyncio.to_thread(generate_monthly_report, month, year)
+            await msg.answer(report_text, parse_mode="Markdown")
+            
+        elif action == "check":
+            await state.update_data(month=month, year=year)
+            await state.set_state(CheckFSM.query)
+            await msg.answer("👉 Nhập Mã GV (VD: GV05) hoặc Tên Nhóm (VD: YOGA) để tra cứu:")
+            
+        elif action == "close":
+            await state.clear()
+            status_msg = await msg.answer(f"⏳ Đang khóa bảng công Tháng {month}/{year} trên Google Sheets...")
+            from export_service.excel_writer import sync_bonus_adjustments_from_db
+            await asyncio.to_thread(sync_bonus_adjustments_from_db, month, year)
+            from export_service.sheet_manager import lock_worksheet
+            success = await asyncio.to_thread(lock_worksheet, month, year)
+            
+            if success:
+                add_audit_log(callback.from_user.id, callback.from_user.username or "", "CLOSE_SHEET", f"Khóa lương tháng {month}/{year}")
+                
+                # XUẤT EXCEL
+                from export_service.excel_generator import generate_payroll_excel
+                excel_path = await asyncio.to_thread(generate_payroll_excel, month, year)
+                
+                await bot.edit_message_text(f"✅ Đã khóa thành công bảng lương Tháng {month}/{year} trên Google Sheets!", chat_id=msg.chat.id, message_id=status_msg.message_id)
+                
+                if excel_path and os.path.exists(excel_path):
+                    from aiogram.types import FSInputFile
+                    excel_file = FSInputFile(excel_path, filename=f"Bang_Luong_T{month}_{year}.xlsx")
+                    await msg.answer_document(document=excel_file, caption=f"📊 File Bảng Lương Tổng hợp Tháng {month}/{year} (Đã chốt)")
+            else:
+                await bot.edit_message_text("❌ Có lỗi xảy ra khi gọi Google Sheets API để khóa.", chat_id=msg.chat.id, message_id=status_msg.message_id)
+    except Exception as e:
+        import logging
+        logging.error(f"DEBUG: Exception in process_month_callback: {e}", exc_info=True)
+        await bot.send_message(callback.message.chat.id if callback.message else callback.from_user.id, f"❌ Có lỗi xảy ra trong bot: {e}")
+
+@dp.callback_query(F.data.startswith("dept_"))
+async def process_dept_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    dept = callback.data.split("_")[1]
+    msg = callback.message
+    
+    # We must know if we are in AddGV or EditGV FSM
+    current_state = await state.get_state()
+    if current_state == AddGV.dept.state:
+        await state.update_data(dept=dept)
+        await state.set_state(AddGV.group_name)
+        await msg.answer(f"✅ Đã chọn bộ phận: {dept}\n\n👉 4. Nhập Tên Nhóm/Phân loại (VD: FREELANCE, HẰNG TRẦN...):")
+    elif current_state == EditGV.dept.state:
+        await state.update_data(dept=dept)
+        await state.set_state(EditGV.group_name)
+        data = await state.get_data()
+        await msg.answer(f"✅ Đã chọn bộ phận: {dept}\n\n👉 Nhập Nhóm MỚI (Gửi `-` để giữ nguyên `{data['old_ins']['group_name']}`):")
 
 # --- ADD_GV FSM ---
 @dp.message(Command("add_gv"))
@@ -129,7 +275,10 @@ async def add_gv_name(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(name=message.text.strip().upper())
     await state.set_state(AddGV.dept)
-    await message.answer("👉 3. Nhập Bộ Phận (VD: YOGA, GX):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="YOGA", callback_data="dept_YOGA"), InlineKeyboardButton(text="GX", callback_data="dept_GX")]
+    ])
+    await message.answer("👉 3. Chọn Bộ Phận (Hoặc tự gõ chữ nếu là bộ phận khác):", reply_markup=kb)
 
 @dp.message(AddGV.dept)
 async def add_gv_dept(message: Message, state: FSMContext) -> None:
@@ -229,7 +378,10 @@ async def edit_gv_name(message: Message, state: FSMContext) -> None:
     else:
         await state.update_data(name=data['old_ins']['name'])
     await state.set_state(EditGV.dept)
-    await message.answer(f"👉 Nhập Bộ Phận MỚI (Gửi `-` để giữ nguyên `{data['old_ins']['department']}`):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="YOGA", callback_data="dept_YOGA"), InlineKeyboardButton(text="GX", callback_data="dept_GX")]
+    ])
+    await message.answer(f"👉 Chọn Bộ Phận MỚI (Hoặc tự gõ. Gửi `-` để giữ nguyên `{data['old_ins']['department']}`):", reply_markup=kb)
     
 @dp.message(EditGV.dept)
 async def edit_gv_dept(message: Message, state: FSMContext) -> None:
@@ -383,6 +535,25 @@ async def list_instructor_handler(message: Message) -> None:
     if response:
         await message.answer(response, parse_mode="Markdown")
 
+
+@dp.message(Command("fix_bonus"))
+async def fix_bonus_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id if message.from_user else 0):
+        await message.answer("❌ Lỗi: Bạn không có quyền thực hiện lệnh này!")
+        return
+
+    now = datetime.now()
+    status_msg = await message.answer(f"⏳ Đang đồng bộ lại thưởng/phạt Tháng {now.month}/{now.year}...")
+    try:
+        from export_service.excel_writer import sync_bonus_adjustments_from_db
+        updated_rows, errors = await asyncio.to_thread(sync_bonus_adjustments_from_db, now.month, now.year)
+        report = f"✅ Đã đồng bộ thưởng/phạt.\n- Tháng: {now.month}/{now.year}\n- Số dòng cập nhật: {updated_rows}"
+        if errors:
+            report += f"\n- Lỗi: {len(errors)}"
+        await bot.edit_message_text(report, chat_id=message.chat.id, message_id=status_msg.message_id)
+    except Exception as e:
+        await bot.edit_message_text(f"❌ Lỗi đồng bộ thưởng/phạt: {e}", chat_id=message.chat.id, message_id=status_msg.message_id)
+
 # --- UNDO FSM ---
 @dp.message(Command("undo"))
 async def undo_start(message: Message, state: FSMContext) -> None:
@@ -458,6 +629,7 @@ async def undo_process(message: Message, state: FSMContext) -> None:
 
 # Tách logic xử lý file Excel ra background task để chống Timeout Webhook
 async def background_process_excel(message: Message, status_msg: Message, document: Document, file_info):
+    tmp_path = ""
     try:
         import hashlib
         from instructor_service.database import is_file_processed, record_processed_file
@@ -474,6 +646,7 @@ async def background_process_excel(message: Message, status_msg: Message, docume
             
         if is_file_processed(file_hash):
             os.remove(tmp_path)
+            tmp_path = ""
             await bot.edit_message_text("❌ Lỗi: File này đã được gửi và tính công trước đó rồi.\nHệ thống từ chối xử lý để chống nhân đôi lương!", 
                                        chat_id=message.chat.id, message_id=status_msg.message_id)
             return
@@ -482,14 +655,26 @@ async def background_process_excel(message: Message, status_msg: Message, docume
                                    
         result = await asyncio.to_thread(process_timesheet, tmp_path, file_hash)
         os.remove(tmp_path)
+        tmp_path = ""
         
         success_count = result.get("success", 0)
-        if success_count > 0:
+        errors = result.get("errors", [])
+        sheet_failed = bool(result.get("sheet_failed", False))
+        if success_count > 0 and not sheet_failed:
             record_processed_file(file_hash, document.file_name)
             add_audit_log((message.from_user.id if message.from_user else 0), (message.from_user.username if message.from_user else ""), "UPLOAD", f"Tải lên file {document.file_name} ({success_count} ca)")
+            from export_service.excel_writer import sync_bonus_adjustments_from_db
+            processed_months = result.get("processed_months") or []
+            if not processed_months:
+                now = datetime.now()
+                processed_months = [{"month": now.month, "year": now.year}]
+            for item in processed_months:
+                await asyncio.to_thread(sync_bonus_adjustments_from_db, int(item["month"]), int(item["year"]))
             
         errors = result.get("errors", [])
         report = f"✅ Xử lý hoàn tất!\n- Mã File: `{file_hash[:8]}`\n- Số ca thành công: {success_count}\n"
+        if sheet_failed:
+            report += "- File chua duoc danh dau da xu ly do co loi ghi Google Sheets.\n"
         if errors:
             report += f"- Số ca bị lỗi/không tính công: {len(errors)}\n\nChi tiết lỗi:\n"
             for err in errors[:10]:
@@ -502,6 +687,10 @@ async def background_process_excel(message: Message, status_msg: Message, docume
     except Exception as e:
         print(f"Lỗi process excel: {e}")
         await bot.edit_message_text("❌ Có lỗi hệ thống nghiêm trọng khi xử lý file. Vui lòng liên hệ Admin!", chat_id=message.chat.id, message_id=status_msg.message_id)
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 @dp.message(F.document)
 async def handle_excel_document(message: Message):
@@ -535,7 +724,12 @@ async def close_start(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Lỗi: Bạn không có quyền thực hiện lệnh này!")
         return
     await state.set_state(CloseFSM.month_year)
-    await message.answer("👉 Nhập Tháng và Năm cần khóa sổ (VD: `06/2026` hoặc `6 2026`):")
+    now = datetime.now()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"close_month_{now.month}_{now.year}")],
+        [InlineKeyboardButton(text="Tháng Trước", callback_data=f"close_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+    ])
+    await message.answer("👉 Chọn hoặc Nhập Tháng và Năm cần CHỐT LƯƠNG (VD: `06/2026`):", reply_markup=kb)
 
 @dp.message(CloseFSM.month_year)
 async def close_process(message: Message, state: FSMContext) -> None:
@@ -554,6 +748,8 @@ async def close_process(message: Message, state: FSMContext) -> None:
         await state.clear()
         status_msg = await message.answer(f"⏳ Đang khóa bảng công Tháng {month}/{year} trên Google Sheets...")
         
+        from export_service.excel_writer import sync_bonus_adjustments_from_db
+        await asyncio.to_thread(sync_bonus_adjustments_from_db, month, year)
         from export_service.sheet_manager import lock_worksheet
         success = await asyncio.to_thread(lock_worksheet, month, year)
         
@@ -577,7 +773,12 @@ async def report_start(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Lỗi: Bạn không có quyền thực hiện lệnh này!")
         return
     await state.set_state(ReportFSM.month_year)
-    await message.answer("👉 Nhập Tháng và Năm cần xuất Báo cáo (VD: `06/2026` hoặc `6 2026`):")
+    now = datetime.now()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"report_month_{now.month}_{now.year}")],
+        [InlineKeyboardButton(text="Tháng Trước", callback_data=f"report_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+    ])
+    await message.answer("👉 Chọn hoặc Nhập Tháng và Năm cần xuất Báo cáo (VD: `06/2026`):", reply_markup=kb)
 
 @dp.message(ReportFSM.month_year)
 async def report_process(message: Message, state: FSMContext) -> None:
@@ -616,7 +817,12 @@ async def check_start(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Lỗi: Bạn không có quyền thực hiện lệnh này!")
         return
     await state.set_state(CheckFSM.month_year)
-    await message.answer("👉 Nhập Tháng và Năm cần tra cứu (VD: `06/2026`)\n💡 Hoặc chỉ cần gõ `nay` để tra cứu tháng hiện tại:")
+    now = datetime.now()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Tháng Hiện Tại ({now.month}/{now.year})", callback_data=f"check_month_{now.month}_{now.year}")],
+        [InlineKeyboardButton(text="Tháng Trước", callback_data=f"check_month_{now.month-1 if now.month>1 else 12}_{now.year if now.month>1 else now.year-1}")]
+    ])
+    await message.answer("👉 Chọn hoặc Nhập Tháng và Năm cần tra cứu (VD: `06/2026`):\n💡 Hoặc chỉ cần gõ `nay` để tra cứu tháng hiện tại:", reply_markup=kb)
 
 @dp.message(CheckFSM.month_year)
 async def check_month(message: Message, state: FSMContext) -> None:
@@ -671,7 +877,7 @@ async def check_process(message: Message, state: FSMContext) -> None:
 
 async def on_startup(bot: Bot):
     if WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL)
+        await bot.set_webhook(WEBHOOK_URL, allowed_updates=dp.resolve_used_update_types())
 
 async def on_shutdown(bot: Bot):
     await bot.delete_webhook()
@@ -680,6 +886,10 @@ async def main():
     if not TOKEN or TOKEN == "nhap_token_cua_ban_vao_day":
         print("LỖI: Chưa có TELEGRAM_BOT_TOKEN trong file .env!")
         return
+
+    global bot
+    if bot is None:
+        bot = Bot(token=TOKEN)
 
     if WEBHOOK_URL:
         print(f"Khởi động Bot chế độ Webhook... URL: {WEBHOOK_URL}")
@@ -713,3 +923,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot đã dừng.")
+
